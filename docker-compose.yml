@@ -1,0 +1,128 @@
+version: '3.5'
+services:
+  reverse-proxy:
+    image: nbmaiti/nginx-proxy:latest
+    container_name: reverse-proxy
+    restart: always
+    depends_on:
+      - nginx-wordpress
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Uncomment to enable multiple nginx-proxy instances
+      # e.g. to use with docker-compose-testing.yml
+      - HTTPS_PASSTHROUGH_PORT=444
+      - HTTPS_METHOD=${HTTPS_METHOD:-nohttp}  
+    labels:
+      - reverse-proxy.nginx-proxy=true
+    volumes:
+      - ${NGINX_PROXY_CONF_DIR:-./nginx}/vhost:/etc/nginx/vhost.d:rw
+      - ${NGINX_PROXY_CONF_DIR:-./nginx}/html:/usr/share/nginx/html
+      - ${NGINX_PROXY_CONF_DIR:-./nginx}/dhparam:/etc/nginx/dhparam
+      - ${SSL_CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:rw
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - frontend
+
+  letsencrypt:
+    image: nbmaiti/letsencrypt-nginx-proxy-companion:latest
+    container_name: letsencrypt
+    restart: always
+    depends_on:
+      - reverse-proxy
+    environment:
+      - DEFAULT_EMAIL=${DEFAULT_EMAIL:-mail@abc.com}
+      - NGINX_PROXY_CONTAINER_LABEL=reverse-proxy.nginx-proxy
+      - NGINX_DOCKER_GEN_CONTAINER=reverse-proxy.nginx-proxy
+    volumes:
+      - ${LETSENCRYPT_ACME_DIR:-./acme}:/etc/acme.sh
+      - ${NGINX_PROXY_CONF_DIR:-./nginx}/html:/usr/share/nginx/html
+      - ${SSL_CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - frontend
+
+  wordpress:
+    image: wordpress:${WORDPRESS_VERSION:-php7.3-fpm-alpine}
+    container_name: wordpress
+    volumes:
+      - ./config/php-ini-overrides.ini:/usr/local/etc/php/conf.d/conf.ini
+      - ./wordpress:/var/www/html
+    environment:
+      - WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME:-wordpress}
+      - WORDPRESS_TABLE_PREFIX=${WORDPRESS_TABLE_PREFIX:-wp_}
+      - WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST:-mysql}
+      - WORDPRESS_DB_USER=${WORDPRESS_DB_USER:-root}
+      - WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD:-password}
+    depends_on:
+      - mysql
+    restart: always
+    networks:
+      - frontend
+      - backend
+
+  mysql:
+      image: nbmaiti/alpine-mariadb:${MARIADB_VERSION:-latest}
+    container_name: mysql
+    volumes:
+      - ./mysql:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-password}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-password}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-wordpress}
+    restart: always
+    networks:
+      - backend
+
+  nginx-wordpress:
+    image: nginx:${NGINX_VERSION:-latest}
+    container_name: nginx-wordprees
+    depends_on:
+      - reverse-proxy
+    environment:
+        - VIRTUAL_HOST=${VIRTUAL_HOST:-xyz.abc.com}
+        - VIRTUAL_PORT=80
+        - LETSENCRYPT_HOST=${VIRTUAL_HOST:-xyz.abc.com}
+#        - LETSENCRYPT_HOST=${LETSENCRYPT_HOST:-xyz.abc.com}
+        - LETSENCRYPT_DNS_MODE=$LETSENCRYPT_DNS_MODE
+        - LETSENCRYPT_DNS_MODE_SETTINGS=$LETSENCRYPT_DNS_MODE_SETTINGS
+    volumes:
+      - ${NGINX_CONF_DIR:-./nginx}:/etc/nginx/conf.d
+      - ${NGINX_LOG_DIR:-./logs/nginx}:/var/log/nginx
+      - ${WORDPRESS_DATA_DIR:-./wordpress}:/var/www/html
+    depends_on:
+      - wordpress
+    restart: always
+    networks:
+      - frontend
+      - backend
+
+  adminer:
+    image: adminer
+    restart: always
+    links:
+      - mysql
+    ports:
+      - 8080:8080
+    networks:
+      - frontend
+      - backend
+
+  ddclient:
+    image: nbmaiti/ddclient
+    container_name: ddclient
+    hostname: ddclient
+    restart: always
+    volumes:
+      - ./ddclient-config:/config
+    networks:
+      - frontend
+
+networks:
+    backend:
+      name: website
+      internal: true
+    frontend:
+      driver: bridge
