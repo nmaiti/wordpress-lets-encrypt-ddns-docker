@@ -310,3 +310,5 @@ If you wish to expose the ports to the host, you'd need to alter the stanzas for
 
 
 
+### DDNS client (optional)
+ddclient is part of docker-compose File.By default it's enabled. Remove/Comment out the code from docker-compose.yaml if already running on VPS/host/have static public ip.
